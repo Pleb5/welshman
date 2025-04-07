@@ -1,5 +1,5 @@
 {
-  "name": "@welshman",
+  "name": "welshman",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -20,13 +20,5 @@
     "prettier": "~3.5.3",
     "typescript": "~5.8.0",
     "typescript-eslint": "~8.29.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "@welshman": "link:"
-    }
-  },
-  "dependencies": {
-    "@welshman": "link:"
   }
 }
