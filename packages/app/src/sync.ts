@@ -3,10 +3,8 @@ import {isSignedEvent, SignedEvent} from "@welshman/util"
 import {
   push as basePush,
   pull as basePull,
-  PublishEvent,
-  RequestEvent,
-  SinglePublish,
-  SingleRequest,
+  publishOne,
+  requestOne,
 } from "@welshman/net"
 import {repository} from "./core.js"
 import {relaysByUrl} from "./relays.js"
@@ -35,9 +33,7 @@ export const pull = async ({relays, filters}: AppSyncOpts) => {
     relays.map(async relay => {
       await (hasNegentropy(relay)
         ? basePull({filters, events, relays: [relay]})
-        : new Promise<void>(resolve => {
-            new SingleRequest({filters, relay, autoClose: true}).on(RequestEvent.Close, resolve)
-          }))
+        : requestOne({filters, relay, autoClose: true}))
     }),
   )
 }
@@ -49,14 +45,7 @@ export const push = async ({relays, filters}: AppSyncOpts) => {
     relays.map(async relay => {
       await (hasNegentropy(relay)
         ? basePush({filters, events, relays: [relay]})
-        : Promise.all(
-            events.map(
-              (event: SignedEvent) =>
-                new Promise<void>(resolve => {
-                  new SinglePublish({event, relay}).on(PublishEvent.Complete, resolve)
-                }),
-            ),
-          ))
+        : Promise.all(events.map((event: SignedEvent) => publishOne({event, relay}))))
     }),
   )
 }

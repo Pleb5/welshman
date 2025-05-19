@@ -14,7 +14,6 @@ import {
   MINUTE,
   HOUR,
   DAY,
-  WEEK,
 } from "@welshman/lib"
 import {
   getFilterId,
@@ -65,7 +64,7 @@ export type RouterOptions = {
    * Retrieves the user's public key.
    * @returns The user's public key as a string, or null if not available.
    */
-  getUserPubkey?: () => string | null
+  getUserPubkey?: () => string | undefined
 
   /**
    * Retrieves relays for the specified public key and mode.
@@ -76,10 +75,10 @@ export type RouterOptions = {
   getPubkeyRelays?: (pubkey: string, mode?: RelayMode) => string[]
 
   /**
-   * Retrieves fallback relays, for use when no other relays can be selected.
+   * Retrieves default relays, for use as fallbacks when no other relays can be selected.
    * @returns An array of relay URLs as strings.
    */
-  getFallbackRelays?: () => string[]
+  getDefaultRelays?: () => string[]
 
   /**
    * Retrieves relays that index profiles and relay selections.
@@ -114,7 +113,7 @@ export type Selection = {
 }
 
 const makeSelection = (relays: string[], weight = 1): Selection => ({
-  relays: relays.map(normalizeRelayUrl),
+  relays: relays.filter(isRelayUrl).map(normalizeRelayUrl),
   weight,
 })
 
@@ -141,7 +140,6 @@ export const getRelayQuality = (url: string) => {
     if (relay.stats.recent_errors.filter(n => n > ago(MINUTE)).length > 0) return 0
     if (relay.stats.recent_errors.filter(n => n > ago(HOUR)).length > 3) return 0
     if (relay.stats.recent_errors.filter(n => n > ago(DAY)).length > 10) return 0
-    if (relay.stats.recent_errors.filter(n => n > ago(WEEK)).length > 50) return 0
   }
 
   // Prefer stuff we're connected to
@@ -178,7 +176,7 @@ export const getPubkeyRelays = (pubkey: string, mode?: string) => {
 export const routerContext: RouterOptions = {
   getRelayQuality,
   getPubkeyRelays,
-  getFallbackRelays: () => ["wss://relay.damus.io/", "wss://nos.lol/"],
+  getDefaultRelays: () => ["wss://relay.damus.io/", "wss://nos.lol/"],
   getIndexerRelays: () => ["wss://purplepag.es/", "wss://relay.nostr.band/"],
   getSearchRelays: () => ["wss://relay.nostr.band/", "wss://nostr.wine/"],
   getUserPubkey: () => pubkey.get(),
@@ -231,18 +229,20 @@ export class Router {
 
   Index = () => this.FromRelays(this.options.getIndexerRelays?.() || [])
 
+  Default = () => this.FromRelays(this.options.getDefaultRelays?.() || [])
+
   ForUser = () => this.FromRelays(this.getRelaysForUser(RelayMode.Read))
 
   FromUser = () => this.FromRelays(this.getRelaysForUser(RelayMode.Write))
 
-  UserInbox = () => this.FromRelays(this.getRelaysForUser(RelayMode.Inbox)).policy(addNoFallbacks)
+  UserInbox = () => this.FromRelays(this.getRelaysForUser(RelayMode.Inbox))
 
   ForPubkey = (pubkey: string) => this.FromRelays(this.getRelaysForPubkey(pubkey, RelayMode.Read))
 
   FromPubkey = (pubkey: string) => this.FromRelays(this.getRelaysForPubkey(pubkey, RelayMode.Write))
 
   PubkeyInbox = (pubkey: string) =>
-    this.FromRelays(this.getRelaysForPubkey(pubkey, RelayMode.Inbox)).policy(addNoFallbacks)
+    this.FromRelays(this.getRelaysForPubkey(pubkey, RelayMode.Inbox))
 
   ForPubkeys = (pubkeys: string[]) => this.merge(pubkeys.map(pubkey => this.ForPubkey(pubkey)))
 
@@ -361,7 +361,7 @@ export class RouterScenario {
   weight = (scale: number) =>
     this.update(selection => ({...selection, weight: selection.weight * scale}))
 
-  getPolicy = () => this.options.policy || addMaximalFallbacks
+  getPolicy = () => this.options.policy || addNoFallbacks
 
   getLimit = () => this.options.limit || this.router.options.getLimit?.() || 3
 
@@ -383,13 +383,13 @@ export class RouterScenario {
     }
 
     const scoreRelay = (relay: string) => {
-      const quality = this.router.options.getRelayQuality?.(relay) || 1
+      const quality = this.router.options.getRelayQuality?.(relay)
       const weight = relayWeights.get(relay)!
 
       // Log the weight, since it's a straight count which ends up over-weighting hubs.
       // Also add some random noise so that we'll occasionally pick lower quality/less
       // popular relays.
-      return -(quality * inc(Math.log(weight)) * Math.random())
+      return quality ? -(quality * inc(Math.log(weight)) * Math.random()) : 0
     }
 
     const relays = take(
@@ -398,7 +398,7 @@ export class RouterScenario {
     )
 
     const fallbacksNeeded = fallbackPolicy(relays.length, limit)
-    const allFallbackRelays: string[] = this.router.options.getFallbackRelays?.() || []
+    const allFallbackRelays: string[] = this.router.options.getDefaultRelays?.() || []
     const fallbackRelays = shuffle(allFallbackRelays).slice(0, fallbacksNeeded)
 
     for (const fallbackRelay of fallbackRelays) {
@@ -493,7 +493,9 @@ export const getFilterSelections = (
   const result = []
 
   for (const [id, filter] of filtersById.entries()) {
-    const scenario = Router.get().merge(scenariosById.get(id) || [])
+    const scenario = Router.get()
+      .merge(scenariosById.get(id) || [])
+      .policy(addMinimalFallbacks)
 
     result.push({filters: [filter], relays: scenario.getUrls()})
   }

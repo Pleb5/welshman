@@ -1,4 +1,4 @@
-import {on, nthEq, always, call, sleep, spec, ago, now} from "@welshman/lib"
+import {on, nthNe, always, call, sleep, ago, now} from "@welshman/lib"
 import {AUTH_JOIN, StampedEvent, SignedEvent} from "@welshman/util"
 import {
   ClientMessage,
@@ -7,7 +7,6 @@ import {
   isClientEvent,
   isClientReq,
   isClientNegClose,
-  ClientMessageType,
   RelayMessage,
   isRelayOk,
   isRelayEose,
@@ -43,14 +42,14 @@ export const socketPolicyAuthBuffer = (socket: Socket) => {
       // If the client is closing a req, remove both from our buffer
       // Otherwise, if auth isn't done, hang on to recent messages in case we need to replay them
       if (isClientClose(message) || isClientNegClose(message)) {
-        buffer = buffer.filter(nthEq(1, message[1]))
+        buffer = buffer.filter(nthNe(1, message[1]))
       } else {
         buffer = buffer.slice(-50).concat([message])
       }
     }),
     on(socket, SocketEvent.Receiving, (message: RelayMessage) => {
       // If the client is closing a request during auth, don't tell the caller, we'll retry it
-      if (isRelayClosed(message) && message[2]?.startsWith('auth-required:')) {
+      if (isRelayClosed(message) && message[2]?.startsWith("auth-required:")) {
         socket._recvQueue.remove(message)
       }
 
@@ -60,7 +59,7 @@ export const socketPolicyAuthBuffer = (socket: Socket) => {
       }
 
       // If the client is rejecting an event during auth, don't tell the caller, we'll retry it
-      if (isRelayOk(message) && !message[2] && message[3]?.startsWith('auth-required:')) {
+      if (isRelayOk(message) && !message[2] && message[3]?.startsWith("auth-required:")) {
         socket._recvQueue.remove(message)
       }
     }),
@@ -200,7 +199,7 @@ export const makeSocketPolicyAuth = (options: SocketPolicyAuthOptions) => (socke
   const unsubscribers = [
     on(socket.auth, AuthStateEvent.Status, (status: AuthStatus) => {
       if (status === AuthStatus.Requested && shouldAuth(socket)) {
-        socket.auth.authenticate(options.sign)
+        socket.auth.doAuth(options.sign)
       }
     }),
   ]

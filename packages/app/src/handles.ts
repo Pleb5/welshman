@@ -1,5 +1,4 @@
 import {writable, derived} from "svelte/store"
-import {MultiRequestOptions} from "@welshman/net"
 import {tryCatch, fetchJson, uniq, batcher, postJson, last} from "@welshman/lib"
 import {collection} from "./collection.js"
 import {deriveProfile} from "./profiles.js"
@@ -105,8 +104,8 @@ export const {
   }),
 })
 
-export const deriveHandleForPubkey = (pubkey: string, request: Partial<MultiRequestOptions> = {}) =>
-  derived([handlesByNip05, deriveProfile(pubkey, request)], ([$handlesByNip05, $profile]) => {
+export const deriveHandleForPubkey = (pubkey: string, relays: string[] = []) =>
+  derived([handlesByNip05, deriveProfile(pubkey, relays)], ([$handlesByNip05, $profile]) => {
     if (!$profile?.nip05) {
       return undefined
     }

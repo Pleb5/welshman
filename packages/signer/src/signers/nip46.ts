@@ -15,7 +15,7 @@ import {
   StampedEvent,
   NOSTR_CONNECT,
 } from "@welshman/util"
-import {MultiRequest, MultiPublish, RequestEvent, AdapterContext} from "@welshman/net"
+import {publish, request, AdapterContext} from "@welshman/net"
 import {ISigner, EncryptionImplementation, decrypt, hash, own} from "../util.js"
 import {Nip01Signer} from "./nip01.js"
 
@@ -97,7 +97,7 @@ const popupManager = (() => {
 })()
 
 export class Nip46Receiver extends Emitter {
-  public sub?: MultiRequest
+  public abortController?: AbortController
 
   constructor(
     public signer: ISigner,
@@ -108,33 +108,38 @@ export class Nip46Receiver extends Emitter {
   // start listening to the remote signer for incoming events
   // broadcast any event returned by the remote signer
   start = async () => {
-    if (this.sub) return
+    if (this.abortController) return
+
+    this.abortController = new AbortController()
 
     const {relays, context} = this.params
     const userPubkey = await this.signer.getPubkey()
     const filters = [{kinds: [NOSTR_CONNECT], "#p": [userPubkey]}]
 
-    this.sub = new MultiRequest({relays, filters, context})
+    request({
+      relays,
+      filters,
+      context,
+      signal: this.abortController.signal,
+      onEvent: async (event: TrustedEvent, url: string) => {
+        const json = await decrypt(this.signer, event.pubkey, event.content)
+        const response = tryCatch(() => JSON.parse(json)) || {}
 
-    this.sub.on(RequestEvent.Event, async (event: TrustedEvent, url: string) => {
-      const json = await decrypt(this.signer, event.pubkey, event.content)
-      const response = tryCatch(() => JSON.parse(json)) || {}
+        // Delay errors in case there's a zombie signer out there clogging things up
+        if (response.error) {
+          await sleep(3000)
+        }
 
-      // Delay errors in case there's a zombie signer out there clogging things up
-      if (response.error) {
-        await sleep(3000)
-      }
-
-      this.emit(Nip46Event.Receive, {...response, url, event} as Nip46Response)
-    })
-
-    this.sub.on(RequestEvent.Close, () => {
-      this.sub = undefined
+        this.emit(Nip46Event.Receive, {...response, url, event} as Nip46Response)
+      },
+      onClose: () => {
+        this.abortController = undefined
+      },
     })
   }
 
   stop = () => {
-    this.sub?.close()
+    this.abortController?.abort()
     this.removeAllListeners()
   }
 }
@@ -162,9 +167,10 @@ export class Nip46Sender extends Emitter {
     const content = await this.signer[algorithm].encrypt(signerPubkey, payload)
     const template = createEvent(NOSTR_CONNECT, {content, tags: [["p", signerPubkey]]})
     const event = await this.signer.sign(template)
-    const pub = new MultiPublish({relays, event, context})
 
-    this.emit(Nip46Event.Send, {...request, pub})
+    publish({relays, event, context})
+
+    this.emit(Nip46Event.Send, request)
   }
 
   // process the queue of requests
@@ -366,7 +372,7 @@ export class Nip46Broker extends Emitter {
     return `nostrconnect://${clientPubkey}?${params.toString()}`
   }
 
-  waitForNostrconnect = (url: string, abort?: AbortController) => {
+  waitForNostrconnect = (url: string, signal: AbortSignal) => {
     const secret = new URL(url).searchParams.get("secret")
 
     return makePromise<Nip46ResponseWithResult, Nip46Response | undefined>((resolve, reject) => {
@@ -395,7 +401,7 @@ export class Nip46Broker extends Emitter {
       this.receiver.on(Nip46Event.Receive, onReceive)
       this.receiver.start()
 
-      abort?.signal.addEventListener("abort", () => {
+      signal.addEventListener("abort", () => {
         reject(undefined)
         cleanup()
       })

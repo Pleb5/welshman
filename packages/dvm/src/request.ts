@@ -1,56 +1,51 @@
 import {Emitter, now} from "@welshman/lib"
 import {TrustedEvent, SignedEvent, Filter} from "@welshman/util"
-import {MultiRequest, MultiPublish, RequestEvent, AdapterContext} from "@welshman/net"
-
-export enum DVMEvent {
-  Progress = "progress",
-  Result = "result",
-}
+import {request, publish, AdapterContext} from "@welshman/net"
 
 export type DVMRequestOptions = {
   event: SignedEvent
   relays: string[]
   timeout?: number
   autoClose?: boolean
-  reportProgress?: boolean
   context?: AdapterContext
+  onResult?: (event: TrustedEvent, url: string) => void
+  onProgress?: (event: TrustedEvent, url: string) => void
 }
 
-export type DVMRequest = {
-  request: DVMRequestOptions
-  emitter: Emitter
-  sub: MultiRequest
-  pub: MultiPublish
-}
-
-export const makeDvmRequest = (request: DVMRequestOptions) => {
-  const emitter = new Emitter()
+export const requestDvmResponse = (options: DVMRequestOptions) => {
   const {
     event,
     relays,
     context,
     timeout = 30_000,
     autoClose = true,
-    reportProgress = true,
-  } = request
+    onResult,
+    onProgress,
+  } = options
   const kind = event.kind + 1000
-  const kinds = reportProgress ? [kind, 7000] : [kind]
+  const kinds = onProgress ? [kind, 7000] : [kind]
   const filters: Filter[] = [{kinds, since: now() - 60, "#e": [event.id]}]
+  const abortController = new AbortController()
+  const signal = AbortSignal.any([abortController.signal, AbortSignal.timeout(timeout)])
 
-  const sub = new MultiRequest({relays, filters, timeout, context})
-  const pub = new MultiPublish({relays, event, timeout, context})
+  return request({
+    signal,
+    relays,
+    filters,
+    context,
+    onEvent: (event: TrustedEvent, url: string) => {
+      if (event.kind === 7000) {
+        onProgress?.(event, url)
+      } else {
+        onResult?.(event, url)
 
-  sub.on(RequestEvent.Event, (event: TrustedEvent, url: string) => {
-    if (event.kind === 7000) {
-      emitter.emit(DVMEvent.Progress, url, event)
-    } else {
-      emitter.emit(DVMEvent.Result, url, event)
-
-      if (autoClose) {
-        sub.close()
+        if (autoClose) {
+          abortController.abort()
+        }
       }
-    }
+    },
   })
-
-  return {request, emitter, sub, pub} as DVMRequest
 }
+
+export const makeDvmRequest = (options: DVMRequestOptions) =>
+  Promise.all([publish(options), requestDvmResponse(options)])

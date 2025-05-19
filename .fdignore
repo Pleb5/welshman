@@ -1,3 +1,5 @@
 node_modules
-build
 docs
+docs/reference
+docs/.vitepress/cache
+build

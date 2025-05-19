@@ -1,21 +1,20 @@
-import { sleep } from "@welshman/lib"
-import WebSocket from 'isomorphic-ws'
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Socket, SocketStatus, SocketEvent } from "../src/socket"
-import { ClientMessage, RelayMessage } from "../src/message"
+import WebSocket from "isomorphic-ws"
+import {afterEach, beforeEach, describe, expect, it, vi} from "vitest"
+import {Socket, SocketStatus, SocketEvent} from "../src/socket"
+import {ClientMessage, RelayMessage} from "../src/message"
 
-vi.mock('isomorphic-ws', () => {
-  const WebSocket = vi.fn(function () {
+vi.mock("isomorphic-ws", () => {
+  const WebSocket = vi.fn(function (this: any) {
     setTimeout(() => this.onopen())
   })
 
   WebSocket.prototype.send = vi.fn()
 
-  WebSocket.prototype.close = vi.fn(function () {
+  WebSocket.prototype.close = vi.fn(function (this: any) {
     this.onclose()
   })
 
-  return { default: WebSocket }
+  return {default: WebSocket}
 })
 
 describe("Socket", () => {
@@ -56,7 +55,7 @@ describe("Socket", () => {
       expect(() => socket.open()).toThrow("Attempted to open a websocket that has not been closed")
     })
 
-    it("should emit invalid status on invalid URL", () => {
+    it("should emit error status on invalid URL", () => {
       const statusSpy = vi.fn()
       socket.on(SocketEvent.Status, statusSpy)
 
@@ -66,7 +65,7 @@ describe("Socket", () => {
 
       socket.open()
 
-      expect(statusSpy).toHaveBeenCalledWith(SocketStatus.Invalid, "wss://test.relay")
+      expect(statusSpy).toHaveBeenCalledWith(SocketStatus.Error, "wss://test.relay")
     })
   })
 
@@ -77,11 +76,11 @@ describe("Socket", () => {
 
       socket.open()
 
-      const ws = socket._ws
+      const closeSpy = vi.spyOn(socket._ws!, "close")
 
       socket.close()
 
-      expect(ws.close).toHaveBeenCalled()
+      expect(closeSpy).toHaveBeenCalled()
       expect(statusSpy).toHaveBeenCalledWith(SocketStatus.Closed, "wss://test.relay")
     })
   })
@@ -91,7 +90,7 @@ describe("Socket", () => {
       const enqueueSpy = vi.fn()
       socket.on(SocketEvent.Sending, enqueueSpy)
 
-      const message: ClientMessage = ["EVENT", { id: "123", kind: 1 }]
+      const message: ClientMessage = ["EVENT", {id: "123", kind: 1}]
       socket.send(message)
 
       expect(enqueueSpy).toHaveBeenCalledWith(message, "wss://test.relay")
@@ -102,14 +101,14 @@ describe("Socket", () => {
       socket.on(SocketEvent.Send, sendSpy)
 
       socket.open()
-      socket._ws.onopen()
+      socket._ws?.onopen?.(undefined as unknown as any)
 
-      const message: ClientMessage = ["EVENT", { id: "123", kind: 1 }]
+      const message: ClientMessage = ["EVENT", {id: "123", kind: 1}]
       socket.send(message)
 
       await vi.runAllTimers()
 
-      expect(socket._ws.send).toHaveBeenCalledWith(JSON.stringify(message))
+      expect(socket._ws!.send).toHaveBeenCalledWith(JSON.stringify(message))
       expect(sendSpy).toHaveBeenCalledWith(message, "wss://test.relay")
     })
   })
@@ -120,10 +119,9 @@ describe("Socket", () => {
       socket.on(SocketEvent.Receive, receiveSpy)
 
       socket.open()
-      const message: RelayMessage = ["EVENT", "123", { id: "123", kind: 1 }]
-      socket._ws.onmessage({ data: JSON.stringify(message) })
+      const message: RelayMessage = ["EVENT", "123", {id: "123", kind: 1}]
+      socket._ws?.onmessage?.({data: JSON.stringify(message)} as unknown as any)
 
-      // Allow task queue to process
       await vi.runAllTimers()
 
       expect(receiveSpy).toHaveBeenCalledWith(message, "wss://test.relay")
@@ -134,7 +132,7 @@ describe("Socket", () => {
       socket.on(SocketEvent.Error, errorSpy)
 
       socket.open()
-      socket._ws.onmessage({ data: "invalid json" })
+      socket._ws?.onmessage?.({data: "invalid json"} as unknown as any)
 
       expect(errorSpy).toHaveBeenCalledWith("Invalid message received", "wss://test.relay")
     })
@@ -144,7 +142,7 @@ describe("Socket", () => {
       socket.on(SocketEvent.Error, errorSpy)
 
       socket.open()
-      socket._ws.onmessage({ data: JSON.stringify({ not: "an array" }) })
+      socket._ws?.onmessage?.({data: JSON.stringify({not: "an array"})} as unknown as any)
 
       expect(errorSpy).toHaveBeenCalledWith("Invalid message received", "wss://test.relay")
     })
@@ -158,7 +156,7 @@ describe("Socket", () => {
 
       socket.cleanup()
 
-      expect(ws.close).toHaveBeenCalled()
+      expect(ws!.close).toHaveBeenCalled()
       expect(socket.listenerCount(SocketEvent.Send)).toBe(0)
     })
   })
@@ -169,7 +167,7 @@ describe("Socket", () => {
       socket.on(SocketEvent.Status, statusSpy)
 
       socket.open()
-      socket._ws.onerror()
+      socket._ws?.onerror?.(undefined as unknown as any)
 
       expect(statusSpy).toHaveBeenCalledWith(SocketStatus.Error, "wss://test.relay")
     })

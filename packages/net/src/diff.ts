@@ -10,8 +10,8 @@ import {
 } from "./message.js"
 import {getAdapter, AdapterContext, AbstractAdapter, AdapterEvent} from "./adapter.js"
 import {Negentropy, NegentropyStorageVector} from "./negentropy.js"
-import {SingleRequest, RequestEvent} from "./request.js"
-import {MultiPublish, PublishEvent} from "./publish.js"
+import {requestOne} from "./request.js"
+import {publish} from "./publish.js"
 
 export enum DifferenceEvent {
   Message = "difference:event:message",
@@ -200,14 +200,18 @@ export const pull = async ({context, ...options}: PullOptions) => {
   await Promise.all(
     Array.from(idsByRelay.entries()).map(([relay, allIds]) => {
       return Promise.all(
-        chunk(500, allIds).map(ids => {
-          return new Promise<void>(resolve => {
-            const req = new SingleRequest({relay, context, filters: [{ids}], autoClose: true})
-
-            req.on(RequestEvent.Close, resolve)
-            req.on(RequestEvent.Event, event => result.push(event as SignedEvent))
-          })
-        }),
+        chunk(500, allIds).map(ids =>
+          new Promise<void>(resolve =>
+            requestOne({
+              relay,
+              context,
+              filters: [{ids}],
+              autoClose: true,
+              onClose: resolve,
+              onEvent: event => result.push(event as SignedEvent),
+            })
+          )
+        ),
       )
     }),
   )
@@ -233,9 +237,7 @@ export const push = async ({context, events, ...options}: PushOptions) => {
       const relays = relaysById.get(event.id)
 
       if (relays) {
-        new Promise<void>(resolve => {
-          new MultiPublish({event, relays, context}).on(PublishEvent.Complete, resolve)
-        })
+        await publish({event, relays, context})
       }
     }),
   )

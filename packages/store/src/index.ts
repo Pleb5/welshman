@@ -10,7 +10,6 @@ import {
   partition,
   first,
 } from "@welshman/lib"
-import {Maybe} from "@welshman/lib"
 import {Repository} from "@welshman/relay"
 import {matchFilters, getIdAndAddress, getIdFilters, Filter, TrustedEvent} from "@welshman/util"
 
@@ -122,27 +121,11 @@ export const custom = <T>(
   }
 }
 
-// Simple adapter
-
-export const adapter = <Source, Target>({
-  store,
-  forward,
-  backward,
-}: {
-  store: Writable<Source>
-  forward: (x: Source) => Target
-  backward: (x: Target) => Source
-}) => ({
-  ...derived(store, forward),
-  set: (x: Target) => store.set(backward(x)),
-  update: (f: (x: Target) => Target) => store.update((x: Source) => backward(f(forward(x)))),
-})
-
 // Event related stores
 
 export type DeriveEventsMappedOptions<T> = {
   filters: Filter[]
-  eventToItem: (event: TrustedEvent) => Maybe<T | T[] | Promise<T | T[]>>
+  eventToItem: (event: TrustedEvent) => T | T[] | Promise<T | T[]> | undefined
   itemToEvent: (item: T) => TrustedEvent
   throttle?: number
   includeDeleted?: boolean

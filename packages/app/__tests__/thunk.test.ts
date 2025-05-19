@@ -1,21 +1,17 @@
-import {now} from "@welshman/lib"
-import {publish, PublishStatus, MockAdapter} from "@welshman/net"
-import {NOTE,  makeEvent} from "@welshman/util"
-import {Nip01Signer} from "@welshman/signer"
+import {PublishStatus} from "@welshman/net"
+import {NOTE, makeEvent} from "@welshman/util"
 import {LOCAL_RELAY_URL} from "@welshman/relay"
 import {getPubkey, makeSecret} from "@welshman/signer"
-import {EventEmitter} from "events"
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest"
 import {repository, tracker} from "../src/core"
-import {addSession, dropSession} from "../src/session"
+import {addSession, dropSession, makeNip01Session} from "../src/session"
 import {
   abortThunk,
-  makeThunk,
-  mergeThunks,
+  Thunk,
+  MergedThunk,
   prepEvent,
   publishThunk,
-  publishThunks,
-  thunkWorker,
+  thunkQueue,
   walkThunks,
 } from "../src/thunk"
 
@@ -31,23 +27,24 @@ const mockRequest = {
 describe("thunk", () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    addSession({method: 'nip01', secret, pubkey})
+    addSession(makeNip01Session(secret))
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    thunkQueue.stop()
+    thunkQueue.clear()
+    await vi.runAllTimersAsync()
     vi.useRealTimers()
     vi.clearAllMocks()
-    thunkWorker.clear()
-    thunkWorker.pause()
-    thunkWorker.resume()
+    thunkQueue.start()
     dropSession(pubkey)
   })
 
-  describe("mergeThunks", () => {
+  describe("MergedThunk", () => {
     it("should abort all thunks when merged controller aborts", () => {
-      const thunk1 = makeThunk(mockRequest)
-      const thunk2 = makeThunk(mockRequest)
-      const merged = mergeThunks([thunk1, thunk2])
+      const thunk1 = new Thunk(mockRequest)
+      const thunk2 = new Thunk(mockRequest)
+      const merged = new MergedThunk([thunk1, thunk2])
 
       merged.controller.abort()
 
@@ -58,9 +55,9 @@ describe("thunk", () => {
 
   describe("walkThunks", () => {
     it("should iterate through nested thunks", () => {
-      const thunk1 = makeThunk(mockRequest)
-      const thunk2 = makeThunk(mockRequest)
-      const merged = mergeThunks([thunk1, thunk2])
+      const thunk1 = new Thunk(mockRequest)
+      const thunk2 = new Thunk(mockRequest)
+      const merged = new MergedThunk([thunk1, thunk2])
       const thunks = Array.from(walkThunks([merged, thunk1]))
 
       expect(thunks).toHaveLength(3)
@@ -69,16 +66,16 @@ describe("thunk", () => {
 
   describe("publishThunk", () => {
     it("should create and publish a thunk", async () => {
-      const publishSpy = vi.spyOn(repository, 'publish')
+      const publishSpy = vi.spyOn(repository, "publish")
       const result = publishThunk(mockRequest)
 
       expect(publishSpy).toHaveBeenCalled()
       expect(result).toHaveProperty("event")
-      expect(result).toHaveProperty("request")
+      expect(result).toHaveProperty("options")
     })
 
     it("should handle abort", () => {
-      const removeEventSpy = vi.spyOn(repository, 'removeEvent')
+      const removeEventSpy = vi.spyOn(repository, "removeEvent")
       const thunk = publishThunk(mockRequest)
 
       thunk.controller.abort()
@@ -87,19 +84,9 @@ describe("thunk", () => {
     })
   })
 
-  describe("publishThunks", () => {
-    it("should publish multiple thunks", () => {
-      const requests = [mockRequest, mockRequest]
-      const result = publishThunks(requests)
-
-      expect(repository.publish).toHaveBeenCalledTimes(2)
-      expect(result.thunks).toHaveLength(2)
-    })
-  })
-
   describe("abortThunk", () => {
     it("should abort a thunk and clean up", () => {
-      const thunk = makeThunk(mockRequest)
+      const thunk = new Thunk(mockRequest)
 
       abortThunk(thunk)
 
@@ -108,28 +95,16 @@ describe("thunk", () => {
   })
 
   it("should update status during publishing", async () => {
-    const send = vi.fn()
-    const track = vi.spyOn(tracker, 'track')
-    const statuses: Map<string, any> = new Map<string, any>()
-    const thunk = makeThunk(mockRequest)
-
-    // Subscribe to status updates
-    thunk.status.subscribe(status => {
-      for (const [key, value] of Object.entries(status)) {
-        statuses.set(key, value)
-      }
-    })
+    const track = vi.spyOn(tracker, "track")
+    const thunk = new Thunk(mockRequest)
 
     // Start the publish process
-    thunkWorker.push(thunk)
+    thunkQueue.push(thunk)
 
     // Wait for initial async operations
     await vi.runAllTimersAsync()
 
-    expect(statuses.get(LOCAL_RELAY_URL)).toEqual({
-      status: PublishStatus.Success,
-      message: "",
-    })
+    expect(thunk.status[LOCAL_RELAY_URL]).toEqual(PublishStatus.Success)
 
     // Verify tracker was called on success
     expect(track).toHaveBeenCalledWith(thunk.event.id, LOCAL_RELAY_URL)
@@ -137,8 +112,6 @@ describe("thunk", () => {
     await vi.runAllTimersAsync()
 
     const finalStatus = await thunk.result
-    expect(finalStatus).toEqual({
-      [LOCAL_RELAY_URL]: {status: PublishStatus.Success, message: ""},
-    })
+    expect(finalStatus).toEqual({[LOCAL_RELAY_URL]: PublishStatus.Success})
   })
 })

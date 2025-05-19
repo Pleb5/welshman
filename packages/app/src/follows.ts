@@ -1,11 +1,9 @@
 import {FOLLOWS, asDecryptedEvent, readList} from "@welshman/util"
 import {TrustedEvent, PublishedList} from "@welshman/util"
-import {MultiRequestOptions, load} from "@welshman/net"
 import {deriveEventsMapped} from "@welshman/store"
 import {repository} from "./core.js"
-import {Router} from "./router.js"
 import {collection} from "./collection.js"
-import {loadRelaySelections} from "./relaySelections.js"
+import {makeOutboxLoader} from "./relaySelections.js"
 
 export const follows = deriveEventsMapped<PublishedList>(repository, {
   filters: [{kinds: [FOLLOWS]}],
@@ -21,12 +19,5 @@ export const {
   name: "follows",
   store: follows,
   getKey: follows => follows.event.pubkey,
-  load: async (pubkey: string, request: Partial<MultiRequestOptions> = {}) => {
-    await loadRelaySelections(pubkey, request)
-
-    const filters = [{kinds: [FOLLOWS], authors: [pubkey]}]
-    const relays = Router.get().FromPubkey(pubkey).getUrls()
-
-    await load({relays, ...request, filters})
-  },
+  load: makeOutboxLoader(FOLLOWS)
 })

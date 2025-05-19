@@ -1,6 +1,5 @@
 import {writable, derived} from "svelte/store"
 import {Zapper} from "@welshman/util"
-import {MultiRequestOptions} from "@welshman/net"
 import {
   identity,
   fetchJson,
@@ -81,8 +80,8 @@ export const {
   }),
 })
 
-export const deriveZapperForPubkey = (pubkey: string, request: Partial<MultiRequestOptions> = {}) =>
-  derived([zappersByLnurl, deriveProfile(pubkey, request)], ([$zappersByLnurl, $profile]) => {
+export const deriveZapperForPubkey = (pubkey: string, relays: string[] = []) =>
+  derived([zappersByLnurl, deriveProfile(pubkey, relays)], ([$zappersByLnurl, $profile]) => {
     if (!$profile?.lnurl) {
       return undefined
     }
